@@ -3,11 +3,13 @@ import { kruskal } from "./kruskal";
 import { dijkstra } from "./dijkstra";
 import { bfs } from "./bfs";
 import { dfs } from "./dfs";
+import { bellmanFord } from "./bellmanFord";
 
 export {
-    topoSort,
-    kruskal,
-    dijkstra,
     bfs,
-    dfs
+    dfs,
+    dijkstra,
+    bellmanFord,
+    kruskal,
+    topoSort,
 }

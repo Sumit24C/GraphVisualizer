@@ -1,18 +1,47 @@
-export const ALGORITHMS = ["BFS", "DFS", "Dijkstra", "Kruskal", "Topological Sort"];
+export const ALGORITHMS = ["BFS", "DFS", "Dijkstra", "Bellman-Ford", "Kruskal"];
 
 export const NODE_RADIUS = 20;
 
 // ── colour helpers ──────────────────────────────────────────────────────────
 export const NODE_COLORS = {
-    default: { fill: "#1e3a5f", stroke: "#3b82f6", text: "#93c5fd" },
-    current: { fill: "#064e3b", stroke: "#10b981", text: "#6ee7b7" },
-    visited: { fill: "#78350f", stroke: "#f59e0b", text: "#fcd34d" },
-    mst: { fill: "#14532d", stroke: "#22c55e", text: "#86efac" },
-    queued: { fill: "#312e81", stroke: "#818cf8", text: "#c7d2fe" },
+    // idle nodes (clean blue glow)
+    default: {
+        fill: "#0f172a",      // deep navy
+        stroke: "#3b82f6",    // bright blue
+        text: "#bfdbfe"       // soft light blue
+    },
+
+    // currently processing node (teal highlight)
+    current: {
+        fill: "#022c22",
+        stroke: "#14b8a6",    // teal
+        text: "#5eead4"
+    },
+
+    // visited / processed (warm amber)
+    visited: {
+        fill: "#451a03",
+        stroke: "#f59e0b",
+        text: "#fde68a"
+    },
+
+    // MST / final edges nodes (green success)
+    mst: {
+        fill: "#052e16",
+        stroke: "#22c55e",
+        text: "#bbf7d0"
+    },
+
+    // queued / updated (violet accent)
+    queued: {
+        fill: "#1e1b4b",
+        stroke: "#8b5cf6",
+        text: "#c4b5fd"
+    },
 };
 
 export const EDGE_COLORS = {
-    default: "#334155",
-    mst: "#22c55e",
-    active: "#f59e0b",
+    default: "#64748b",   // brighter slate (not faded anymore)
+    mst: "#22c55e",       // green
+    active: "#f59e0b",    // orange
 };

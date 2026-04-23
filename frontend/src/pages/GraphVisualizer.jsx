@@ -1,82 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { CustomButton } from "../components/CustomButton";
-import { bfs, dfs, dijkstra, kruskal, topoSort } from "../utils/algorithms";
+import { bfs, dfs, dijkstra, bellmanFord, kruskal, topoSort } from "../utils/algorithms";
 import { ALGORITHMS, NODE_COLORS, NODE_RADIUS, EDGE_COLORS } from "../constants";
 import { drawGraph } from "../utils/graphBuilder/graph";
+import DistTable from "../components/DistTable";
+import EdgeCostBadge from "../components/EdgeCostBadge";
 
-// ── distance / cost table shown beneath step log for relevant algorithms ───
-function DistTable({ algo, nodes, step }) {
-    if (!step || !["Dijkstra", "Kruskal"].includes(algo)) return null;
-
-    const rows = nodes.map(n => {
-        const raw = step.nodeStates?.[n.id];
-        const val = typeof raw === "object"
-            ? (raw?.dist !== undefined ? raw.dist : raw?.cost)
-            : undefined;
-        const state = typeof raw === "object" ? raw?.state : raw;
-        return { n, val, state };
-    });
-
-    const label = algo === "Dijkstra" ? "dist" : "cost";
-
-    return (
-        <div className="mt-2">
-            <p className="text-xs text-slate-500 uppercase tracking-widest mb-1">{label} table</p>
-            <div className="flex flex-wrap gap-1.5">
-                {rows.map(({ n, val, state }) => {
-                    const col = NODE_COLORS[state] ?? NODE_COLORS.default;
-                    return (
-                        <span
-                            key={n.id}
-                            className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md font-mono border"
-                            style={{
-                                background: col.fill,
-                                borderColor: col.stroke,
-                                color: col.text,
-                            }}
-                        >
-                            <span className="font-bold">{n.label}</span>
-                            <span className="opacity-70">=</span>
-                            <span>{val === undefined || val === Infinity ? "∞" : val}</span>
-                        </span>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
-// ── edge cost summary for Kruskal / Dijkstra ──────────────────────────────
-function EdgeCostBadge({ edges, edgeStates }) {
-    const highlighted = edges.filter(e => {
-        const s = edgeStates?.[e.id];
-        return s && s !== "default";
-    });
-    if (!highlighted.length) return null;
-
-    return (
-        <div className="mt-2">
-            <p className="text-xs text-slate-500 uppercase tracking-widest mb-1">highlighted edges</p>
-            <div className="flex flex-wrap gap-1.5">
-                {highlighted.map(e => {
-                    const s = edgeStates[e.id];
-                    const color = EDGE_COLORS[s] ?? EDGE_COLORS.default;
-                    return (
-                        <span
-                            key={e.id}
-                            className="text-xs px-2 py-0.5 rounded-md font-mono border"
-                            style={{ borderColor: color, color }}
-                        >
-                            {e.from}→{e.to}  <span className="opacity-60">w=</span>{e.weight}
-                        </span>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
-// ── main component ────────────────────────────────────────────────────────
 export default function GraphVisualizer() {
     const canvasRef = useRef(null);
 
@@ -95,6 +24,9 @@ export default function GraphVisualizer() {
     const [stepIndex, setStepIndex] = useState(0);
     const [running, setRunning] = useState(false);
     const [speed, setSpeed] = useState(700);
+
+    const [selectedNode, setSelectedNode] = useState(null);
+    const [selectedEdge, setSelectedEdge] = useState(null);
 
     // refs for animation loop — never stale
     const runningRef = useRef(false);
@@ -119,17 +51,88 @@ export default function GraphVisualizer() {
 
     // redraw whenever graph or highlight state changes
     useEffect(() => {
-        drawGraph(canvasRef.current, nodes, edges, currentNodeStates, currentEdgeStates);
+        drawGraph(
+            canvasRef.current,
+            nodes,
+            edges,
+            currentNodeStates,
+            currentEdgeStates,
+            selectedNode,
+            selectedEdge
+        );
     }, [nodes, edges, currentNodeStates, currentEdgeStates]);
 
     // resize observer
     useEffect(() => {
         const ro = new ResizeObserver(() => {
-            drawGraph(canvasRef.current, nodes, edges, currentNodeStates, currentEdgeStates);
+            drawGraph(
+                canvasRef.current,
+                nodes,
+                edges,
+                currentNodeStates,
+                currentEdgeStates,
+                selectedNode,
+                selectedEdge
+            );
         });
         if (canvasRef.current) ro.observe(canvasRef.current);
         return () => ro.disconnect();
     });
+
+    const deleteNode = () => {
+        if (!selectedNode) return;
+
+        setNodes(prev => prev.filter(n => n.id !== selectedNode));
+        setEdges(prev => prev.filter(e => e.from !== selectedNode && e.to !== selectedNode));
+        setSelectedNode(null);
+    };
+
+    const deleteEdge = () => {
+        if (!selectedEdge) return;
+
+        setEdges(prev => prev.filter(e => e.id !== selectedEdge));
+        setSelectedEdge(null);
+    };
+
+    const updateNodeLabel = (newLabel) => {
+        setNodes(prev =>
+            prev.map(n =>
+                n.id === selectedNode ? { ...n, label: newLabel } : n
+            )
+        );
+    };
+
+    const updateEdgeWeight = (newWeight) => {
+        setEdges(prev =>
+            prev.map(e =>
+                e.id === selectedEdge
+                    ? { ...e, weight: Number(newWeight) }
+                    : e
+            )
+        );
+    };
+
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === "Delete" || e.key === "Backspace") {
+
+                // if node is selected → delete node
+                if (selectedNode) {
+                    deleteNode();
+                    return;
+                }
+
+                // if edge is selected → delete edge
+                if (selectedEdge) {
+                    deleteEdge();
+                    return;
+                }
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [selectedNode, selectedEdge]);
 
     // ── canvas interaction ──────────────────────────────────────────────────
     const getPos = e => {
@@ -137,17 +140,66 @@ export default function GraphVisualizer() {
         return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
 
+    function pointToLineDistance(px, py, x1, y1, x2, y2) {
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const len_sq = C * C + D * D;
+        let param = -1;
+
+        if (len_sq !== 0) param = dot / len_sq;
+
+        let xx, yy;
+
+        if (param < 0) {
+            xx = x1;
+            yy = y1;
+        } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+        } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+        }
+
+        const dx = px - xx;
+        const dy = py - yy;
+
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
     const handleCanvasClick = useCallback(e => {
         if (draggingRef.current) return;
         const { x, y } = getPos(e);
         const hit = nodes.find(n => Math.hypot(n.x - x, n.y - y) < NODE_RADIUS);
-        if (!hit) {
-            const id = Date.now();
-            setNodes(prev => [
-                ...prev,
-                { id, label: String(prev.length + 1), x, y },
-            ]);
+        if (hit) {
+            setSelectedNode(hit.id);
+            setSelectedEdge(null);
+            return;
         }
+
+        // detect edge click (basic proximity)
+        const edgeHit = edges.find(e => {
+            const from = nodes.find(n => n.id === e.from);
+            const to = nodes.find(n => n.id === e.to);
+            if (!from || !to) return false;
+
+            const dist = pointToLineDistance(x, y, from.x, from.y, to.x, to.y);
+            return dist < 6; // threshold
+        });
+
+        if (edgeHit) {
+            setSelectedEdge(edgeHit.id);
+            setSelectedNode(null);
+            return;
+        }
+
+        // otherwise add node
+        const id = Date.now();
+        setNodes(prev => [...prev, { id, label: String(prev.length + 1), x, y }]);
     }, [nodes]);
 
     const handleMouseDown = useCallback(e => {
@@ -190,8 +242,55 @@ export default function GraphVisualizer() {
         const from = parseInt(edgeFrom), to = parseInt(edgeTo);
         if (edges.find(e => e.from === from && e.to === to)) return;
         setEdges(prev => [...prev, {
-            id: Date.now(), from, to, weight: Number(edgeWeight) || 1,
+            id: Date.now(), from, to, weight: edgeWeight === "" ? 1 : Number(edgeWeight),
         }]);
+    };
+
+    const handleJsonUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+
+                // validation
+                if (!data.nodes || !data.edges) {
+                    alert("Invalid JSON: must contain nodes and edges");
+                    return;
+                }
+
+                // normalize nodes
+                const parsedNodes = data.nodes.map((n, i) => ({
+                    id: n.id ?? Date.now() + i,
+                    label: n.label ?? String(i + 1),
+                    x: n.x ?? 100 + Math.random() * 300,
+                    y: n.y ?? 100 + Math.random() * 200,
+                }));
+
+                // normalize edges
+                const parsedEdges = data.edges.map((e, i) => ({
+                    id: e.id ?? Date.now() + i + 1000,
+                    from: e.from,
+                    to: e.to,
+                    weight: e.weight ?? 1,
+                }));
+
+                // reset + load
+                handleReset();
+                setNodes(parsedNodes);
+                setEdges(parsedEdges);
+                setSelectedNode(null);
+                setSelectedEdge(null);
+
+            } catch (err) {
+                alert("Invalid JSON file");
+            }
+        };
+
+        reader.readAsText(file);
     };
 
     // ── animation loop ───────────────────────────────────────────────────────
@@ -239,6 +338,7 @@ export default function GraphVisualizer() {
         if (algo === "BFS") result = bfs(nodes, edges, startId);
         else if (algo === "DFS") result = dfs(nodes, edges, startId);
         else if (algo === "Dijkstra") result = dijkstra(nodes, edges, startId);
+        else if (algo === "Bellman-Ford") result = bellmanFord(nodes, edges, startId);
         else if (algo === "Kruskal") result = kruskal(nodes, edges);
         else if (algo === "Topological Sort") result = topoSort(nodes, edges);
         stepsRef.current = result;
@@ -298,7 +398,7 @@ export default function GraphVisualizer() {
 
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col gap-2">
                     <p className="text-xs text-slate-500 uppercase tracking-widest">Add Node</p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
                         <input
                             value={nodeLabel_}
                             onChange={e => setNodeLabel_(e.target.value)}
@@ -306,7 +406,21 @@ export default function GraphVisualizer() {
                             placeholder="Label (optional)"
                             className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
                         />
+
                         <CustomButton onClick={addNode} color="blue">+ Node</CustomButton>
+
+                        {/* JSON Upload */}
+                        <label className="cursor-pointer">
+                            <input
+                                type="file"
+                                accept=".json"
+                                onChange={handleJsonUpload}
+                                className="hidden"
+                            />
+                            <span className="px-3 py-1.5 text-sm rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:border-blue-500">
+                                Upload JSON
+                            </span>
+                        </label>
                     </div>
                 </div>
 
@@ -324,7 +438,7 @@ export default function GraphVisualizer() {
                             {nodes.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
                         </select>
                         <input
-                            type="number" value={edgeWeight} min={1}
+                            type="number" value={edgeWeight}
                             onChange={e => setEdgeWeight(e.target.value)}
                             className="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 text-center"
                             placeholder="W"
@@ -350,7 +464,45 @@ export default function GraphVisualizer() {
                     click canvas to add node · drag to move
                 </p>
             </div>
+            {selectedNode && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2 items-center">
+                    <span className="text-xs text-slate-400">Node</span>
 
+                    <input
+                        placeholder="Edit label"
+                        onChange={(e) => updateNodeLabel(e.target.value)}
+                        className="bg-slate-800 border border-slate-700 px-2 py-1 rounded text-sm"
+                    />
+
+                    <CustomButton onClick={deleteNode} color="red">
+                        Delete Node
+                    </CustomButton>
+                    <CustomButton onClick={() => setSelectedNode(null)} color="red">
+                        X
+                    </CustomButton>
+                </div>
+            )}
+
+            {selectedEdge && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2 items-center">
+                    <span className="text-xs text-slate-400">Edge {selectedEdge}</span>
+
+                    <input
+                        type="number"
+                        placeholder="Weight"
+                        onChange={(e) => updateEdgeWeight(e.target.value)}
+                        className="w-20 bg-slate-800 border border-slate-700 px-2 py-1 rounded text-sm"
+                    />
+
+                    <CustomButton onClick={deleteEdge} color="red">
+                        Delete Edge
+                    </CustomButton>
+
+                    <CustomButton onClick={() => setSelectedEdge(null)} color="red">
+                        X
+                    </CustomButton>
+                </div>
+            )}
             {/* ── algorithm controls ── */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap gap-2 items-center">
                 <select value={algo} onChange={e => setAlgo(e.target.value)}
@@ -452,7 +604,7 @@ export default function GraphVisualizer() {
                     <DistTable algo={algo} nodes={nodes} step={currentStep} />
 
                     {/* highlighted edge costs */}
-                    <EdgeCostBadge edges={edges} edgeStates={currentEdgeStates} />
+                    {/* <EdgeCostBadge edges={edges} edgeStates={currentEdgeStates} /> */}
                 </div>
             </div>
         </div>

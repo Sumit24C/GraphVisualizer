@@ -1,4 +1,4 @@
-import { buildAdjacency, nodeLabel } from "../graphBuilder/graph";
+import { buildAdjacency, nodeLabel, buildNodeStates, buildEdgeState, highlightShortestPath } from "../graphBuilder/graph";
 
 export function dijkstra(nodes, edges, startId) {
     const g = buildAdjacency(nodes, edges);
@@ -26,9 +26,12 @@ export function dijkstra(nodes, edges, startId) {
 
         if (u === null || dist[u] === Infinity) break;
 
-        // STEP: select node
+        // SELECT
         steps.push({
-            nodeStates: buildNodeStates(nodes, visited, u, dist),
+            nodeStates: buildNodeStates(nodes, dist, (id) =>
+                id === u ? "current" :
+                visited.has(id) ? "visited" : "default"
+            ),
             edgeStates: {},
             label: `Select ${nodeLabel(nodes, u)} (dist=${dist[u]})`
         });
@@ -44,24 +47,31 @@ export function dijkstra(nodes, edges, startId) {
                 parent[nei.node] = u;
 
                 steps.push({
-                    nodeStates: buildNodeStates(nodes, visited, nei.node, dist),
+                    nodeStates: buildNodeStates(nodes, dist, (id) =>
+                        id === nei.node ? "current" :
+                        visited.has(id) ? "visited" : "default"
+                    ),
                     edgeStates: buildEdgeState(edges, u, nei.node),
                     label: `Relax ${nodeLabel(nodes, u)} → ${nodeLabel(nodes, nei.node)} | dist=${newDist}`
                 });
             }
         }
 
-        // finalize
+        // FINALIZE NODE
         steps.push({
-            nodeStates: buildNodeStates(nodes, visited, null, dist),
+            nodeStates: buildNodeStates(nodes, dist, (id) =>
+                visited.has(id) ? "visited" : "default"
+            ),
             edgeStates: {},
             label: `Finalize ${nodeLabel(nodes, u)}`
         });
     }
 
-    // 🔥 FINAL STEP: show shortest paths
+    // FINAL RESULT
     steps.push({
-        nodeStates: buildNodeStates(nodes, visited, null, dist),
+        nodeStates: buildNodeStates(nodes, dist, (id) =>
+            dist[id] !== Infinity ? "visited" : "default"
+        ),
         edgeStates: highlightShortestPath(edges, parent),
         label: `Final distances: ${nodes.map(n =>
             `${nodeLabel(nodes, n.id)}=${dist[n.id] === Infinity ? "∞" : dist[n.id]}`
@@ -69,47 +79,4 @@ export function dijkstra(nodes, edges, startId) {
     });
 
     return steps;
-}
-
-
-// helpers
-function buildNodeStates(nodes, visited, current, dist) {
-    return Object.fromEntries(
-        nodes.map(n => [
-            n.id,
-            {
-                state:
-                    n.id === current
-                        ? "current"
-                        : visited.has(n.id)
-                            ? "visited"
-                            : "default",
-                dist: dist[n.id]
-            }
-        ])
-    );
-}
-
-function buildEdgeState(edges, from, to) {
-    return Object.fromEntries(
-        edges.map(e => [
-            e.id,
-            (e.from === from && e.to === to) ? "active" : "default"
-        ])
-    );
-}
-
-function highlightShortestPath(edges, parent) {
-    const result = {};
-
-    for (const node in parent) {
-        if (parent[node] !== null) {
-            const p = parent[node];
-
-            const edge = edges.find(e => e.from == p && e.to == node);
-            if (edge) result[edge.id] = "mst";
-        }
-    }
-
-    return result;
 }
