@@ -516,7 +516,23 @@ export default function GraphVisualizer() {
 
 
     if (loading) {
-        return <div className="text-white p-4">Loading graph...</div>;
+        return (
+            <div className={`min-h-screen flex items-center justify-center ${T.bg} ${T.text}`}>
+
+                <div className="flex flex-col items-center gap-4">
+
+                    {/* Spinner */}
+                    <div className="w-10 h-10 border-4 border-neutral-300 border-t-green-500 rounded-full animate-spin"></div>
+
+                    {/* Text */}
+                    <p className={`text-sm ${T.subtext}`}>
+                        Loading your graph...
+                    </p>
+
+                </div>
+
+            </div>
+        );
     }
 
     return (
@@ -567,7 +583,7 @@ export default function GraphVisualizer() {
                         }}
                         T={T}
                     />
-                    
+
                     <input
                         value={nodeLabel_}
                         onChange={e => setNodeLabel_(e.target.value)}
