@@ -1,21 +1,91 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { CustomButton } from "../components/CustomButton";
 import { bfs, dfs, dijkstra, bellmanFord, kruskal, topoSort } from "../utils/algorithms";
-import { ALGORITHMS, NODE_COLORS, NODE_RADIUS, EDGE_COLORS } from "../constants";
+import { ALGORITHMS, NODE_COLORS, NODE_RADIUS, EDGE_COLORS, BASE_URL } from "../constants";
 import { drawGraph, loadGraph } from "../utils/graphBuilder/graph";
 import DistTable from "../components/DistTable";
 import EdgeCostBadge from "../components/EdgeCostBadge";
+import Legend from "../components/Legend";
+import Header from "../components/Header";
+import StatsBar from "../components/StatsBar";
+import GraphManager from "../components/GraphManager";
+
 import { btnDanger, btnNeutral, btnPrimary, selectClass, THEMES } from "../Theme";
+import { useNavigate, useParams } from "react-router-dom";
 
 export default function GraphVisualizer() {
     const canvasRef = useRef(null);
     const [theme, setTheme] = useState("dark");
 
     const T = THEMES[theme];
-    const initial = loadGraph();
+    const { id } = useParams();
+    const navigate = useNavigate();
 
-    const [nodes, setNodes] = useState(initial.nodes);
-    const [edges, setEdges] = useState(initial.edges);
+    const token = localStorage.getItem("token");
+    const [currentGraphId, setCurrentGraphId] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    const [nodes, setNodes] = useState([]);
+    const [edges, setEdges] = useState([]);
+
+    useEffect(() => {
+        if (!token) return;
+
+        const init = async () => {
+            setLoading(true);
+
+            if (id === "new") {
+                const res = await fetch(`${BASE_URL}/graph`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ nodes: [], edges: [] })
+                });
+
+                const data = await res.json();
+                navigate(`/graph/${data._id}`, { replace: true });
+                return;
+            }
+
+            const res = await fetch(`${BASE_URL}/graph/${id}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (!res.ok) {
+                navigate("/graph/new");
+                return;
+            }
+
+            const data = await res.json();
+
+            setNodes(data.nodes || []);
+            setEdges(data.edges || []);
+            setCurrentGraphId(id);
+            setLoading(false);
+        };
+
+        init();
+    }, [id]);
+
+    useEffect(() => {
+        if (!currentGraphId || !token) return;
+
+        const t = setTimeout(() => {
+            fetch(`${BASE_URL}/graph/${currentGraphId}`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ nodes, edges })
+            });
+        }, 800);
+
+        return () => clearTimeout(t);
+
+    }, [nodes, edges]);
 
     const [nodeLabel_, setNodeLabel_] = useState("");
     const [edgeFrom, setEdgeFrom] = useState("");
@@ -362,7 +432,7 @@ export default function GraphVisualizer() {
 
         reader.readAsText(file);
     };
-    
+
     // ── animation loop ───────────────────────────────────────────────────────
     const tick = useCallback(() => {
         const idx = stepIndexRef.current;
@@ -444,12 +514,16 @@ export default function GraphVisualizer() {
         activeStepRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }, [stepIndex]);
 
-    // ── render ───────────────────────────────────────────────────────────────
+
+    if (loading) {
+        return <div className="text-white p-4">Loading graph...</div>;
+    }
+
     return (
         <div className={`min-h-screen ${T.bg} ${T.text} font-mono p-4 flex flex-col gap-4`}>
 
             {/* ── header ── */}
-            <div className="flex items-center gap-3">
+            {/* <div className="flex items-center gap-3">
                 <h1 className={`text-lg font-semibold tracking-wide ${T.accent}`}>
                     Graph Visualizer
                 </h1>
@@ -472,90 +546,89 @@ export default function GraphVisualizer() {
                         {theme === "dark" ? "Light" : "Dark"}
                     </button>
                 </div>
-            </div>
+            </div> */}
+            <Header theme={theme} setTheme={setTheme} T={T} />
 
-            {/* ── add node / edge ── */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex gap-3 items-stretch">
 
-                {/* Add Node */}
-                <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex flex-col gap-2`}>
-                    <p className={`text-xs ${T.subtext}`}>Add Node</p>
+                {/* Add Node (reduced width) */}
+                <div className={`${T.panel} border ${T.border} rounded-lg px-3 py-2 flex items-center gap-2`}>
 
-                    <div className="flex gap-2">
-                        <input
-                            value={nodeLabel_}
-                            onChange={e => setNodeLabel_(e.target.value)}
-                            onKeyDown={e => e.key === "Enter" && addNode()}
-                            placeholder="Label"
-                            className="flex-1 bg-transparent border border-neutral-600 rounded px-2 py-1 text-sm outline-none focus:border-green-500"
-                        />
+                    <GraphManager
+                        nodes={nodes}
+                        edges={edges}
+                        setNodes={setNodes}
+                        setEdges={setEdges}
+                        currentGraphId={currentGraphId}
+                        setCurrentGraphId={setCurrentGraphId}
+                        onGraphLoaded={(id) => {
+                            setCurrentGraphId(id);
+                            navigate(`/graph/${id}`);
+                        }}
+                        T={T}
+                    />
+                    
+                    <input
+                        value={nodeLabel_}
+                        onChange={e => setNodeLabel_(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && addNode()}
+                        placeholder="Node"
+                        className="w-28 bg-transparent border border-neutral-600 rounded px-2 py-1 text-sm outline-none focus:border-green-500"
+                    />
 
-                        <button onClick={addNode} className="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-sm">
-                            +
-                        </button>
+                    <button
+                        onClick={addNode}
+                        className="px-2 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-sm"
+                    >
+                        +
+                    </button>
 
-                        <label className="cursor-pointer">
-                            <input type="file" accept=".json" onChange={handleJsonUpload} className="hidden" />
-                            <span className={`px-2 py-1 text-sm rounded ${T.button}`}>JSON</span>
-                        </label>
-                    </div>
+                    <label className="cursor-pointer">
+                        <input type="file" accept=".json" onChange={handleJsonUpload} className="hidden" />
+                        <span className={`px-2 py-1 text-xs rounded ${T.button}`}>JSON</span>
+                    </label>
                 </div>
 
                 {/* Add Edge */}
-                <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex flex-col gap-2`}>
-                    <p className={`text-xs ${T.subtext}`}>Add Edge</p>
+                <div className={`${T.panel} border ${T.border} rounded-lg px-3 py-2 flex items-center gap-2`}>
 
-                    <div className="flex gap-2">
-                        <div className="relative flex-1">
-                            <select
-                                value={edgeFrom}
-                                onChange={e => setEdgeFrom(e.target.value)}
-                                className={`${selectClass(T)} w-full`}
-                            >
-                                <option value="">From</option>
-                                {nodes.map(n => (
-                                    <option key={n.id} value={n.id}>
-                                        {n.label}
-                                    </option>
-                                ))}
-                            </select>
+                    <select
+                        value={edgeFrom}
+                        onChange={e => setEdgeFrom(e.target.value)}
+                        className={`${selectClass(T)} w-24`}
+                    >
+                        <option value="">From</option>
+                        {nodes.map(n => (
+                            <option key={n.id} value={n.id}>{n.label}</option>
+                        ))}
+                    </select>
 
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
-                                ▼
-                            </span>
-                        </div>
+                    <select
+                        value={edgeTo}
+                        onChange={e => setEdgeTo(e.target.value)}
+                        className={`${selectClass(T)} w-24`}
+                    >
+                        <option value="">To</option>
+                        {nodes.map(n => (
+                            <option key={n.id} value={n.id}>{n.label}</option>
+                        ))}
+                    </select>
 
-                        <div className="relative flex-1">
-                            <select
-                                value={edgeTo}
-                                onChange={e => setEdgeTo(e.target.value)}
-                                className={`${selectClass(T)} w-full`}
-                            >
-                                <option value="">To</option>
-                                {nodes.map(n => (
-                                    <option key={n.id} value={n.id}>
-                                        {n.label}
-                                    </option>
-                                ))}
-                            </select>
+                    <input
+                        type="number"
+                        value={edgeWeight}
+                        onChange={e => setEdgeWeight(e.target.value)}
+                        className="w-16 bg-transparent border border-neutral-600 rounded px-2 py-1 text-sm text-center"
+                    />
 
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
-                                ▼
-                            </span>
-                        </div>
-
-                        <input
-                            type="number"
-                            value={edgeWeight}
-                            onChange={e => setEdgeWeight(e.target.value)}
-                            className="w-16 bg-transparent border border-neutral-600 rounded px-2 py-1 text-sm text-center"
-                        />
-
-                        <button onClick={addEdge} className="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-sm">
-                            +
-                        </button>
-                    </div>
+                    <button
+                        onClick={addEdge}
+                        className="px-2 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-sm"
+                    >
+                        +
+                    </button>
                 </div>
+
             </div>
 
             {/* ── canvas ── */}
@@ -668,25 +741,35 @@ export default function GraphVisualizer() {
                 </div>
             </div>
 
-            {/* ── steps ── */}
             <div className={`${T.panel} border ${T.border} rounded-lg p-3`}>
-                <div className="text-xs mb-2">Steps</div>
+                <div className="grid grid-cols-2 gap-4">
 
-                <div className="max-h-32 overflow-y-auto text-xs flex flex-col gap-1">
-                    {steps.map((s, i) => (
-                        <div
-                            key={i}
-                            className={`px-2 py-1 rounded ${i === stepIndex - 1
-                                ? "bg-green-700 text-white"
-                                : "text-neutral-500"
-                                }`}
-                        >
-                            {i + 1}. {s.label}
+                    {/* LEFT → Steps */}
+                    <div className="flex flex-col">
+                        <div className="text-xs mb-2">Steps</div>
+
+                        <div className="max-h-40 overflow-y-auto text-xs flex flex-col gap-1 pr-1">
+                            {steps.map((s, i) => (
+                                <div
+                                    key={i}
+                                    className={`px-2 py-1 rounded ${i === stepIndex - 1
+                                        ? "bg-green-700 text-white"
+                                        : "text-neutral-500"
+                                        }`}
+                                >
+                                    {i + 1}. {s.label}
+                                </div>
+                            ))}
                         </div>
-                    ))}
-                </div>
+                    </div>
 
-                <DistTable algo={algo} nodes={nodes} step={currentStep} />
+                    {/* RIGHT → Legend + Table */}
+                    <div className="flex flex-col gap-3">
+                        <Legend theme={T} />
+                        <DistTable algo={algo} nodes={nodes} step={currentStep} />
+                    </div>
+
+                </div>
             </div>
 
         </div>

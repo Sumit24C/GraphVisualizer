@@ -1,3 +1,5 @@
+export const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
 export const ALGORITHMS = ["BFS", "DFS", "Dijkstra", "Bellman-Ford", "Kruskal"];
 
 export const NODE_RADIUS = 20;
