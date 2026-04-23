@@ -2,15 +2,20 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { CustomButton } from "../components/CustomButton";
 import { bfs, dfs, dijkstra, bellmanFord, kruskal, topoSort } from "../utils/algorithms";
 import { ALGORITHMS, NODE_COLORS, NODE_RADIUS, EDGE_COLORS } from "../constants";
-import { drawGraph } from "../utils/graphBuilder/graph";
+import { drawGraph, loadGraph } from "../utils/graphBuilder/graph";
 import DistTable from "../components/DistTable";
 import EdgeCostBadge from "../components/EdgeCostBadge";
+import { btnDanger, btnNeutral, btnPrimary, selectClass, THEMES } from "../Theme";
 
 export default function GraphVisualizer() {
     const canvasRef = useRef(null);
+    const [theme, setTheme] = useState("dark");
 
-    const [nodes, setNodes] = useState([]);
-    const [edges, setEdges] = useState([]);
+    const T = THEMES[theme];
+    const initial = loadGraph();
+
+    const [nodes, setNodes] = useState(initial.nodes);
+    const [edges, setEdges] = useState(initial.edges);
 
     const [nodeLabel_, setNodeLabel_] = useState("");
     const [edgeFrom, setEdgeFrom] = useState("");
@@ -27,6 +32,9 @@ export default function GraphVisualizer() {
 
     const [selectedNode, setSelectedNode] = useState(null);
     const [selectedEdge, setSelectedEdge] = useState(null);
+
+    const [edgeStartNode, setEdgeStartNode] = useState(null);
+    const [tempEdgePos, setTempEdgePos] = useState(null);
 
     // refs for animation loop — never stale
     const runningRef = useRef(false);
@@ -49,6 +57,15 @@ export default function GraphVisualizer() {
     const currentNodeStates = currentStep?.nodeStates ?? {};
     const currentEdgeStates = currentStep?.edgeStates ?? {};
 
+    useEffect(() => {
+        const data = {
+            nodes,
+            edges
+        };
+
+        localStorage.setItem("graph-data", JSON.stringify(data));
+    }, [nodes, edges]);
+
     // redraw whenever graph or highlight state changes
     useEffect(() => {
         drawGraph(
@@ -58,7 +75,9 @@ export default function GraphVisualizer() {
             currentNodeStates,
             currentEdgeStates,
             selectedNode,
-            selectedEdge
+            selectedEdge,
+            edgeStartNode,
+            tempEdgePos
         );
     }, [nodes, edges, currentNodeStates, currentEdgeStates]);
 
@@ -72,7 +91,9 @@ export default function GraphVisualizer() {
                 currentNodeStates,
                 currentEdgeStates,
                 selectedNode,
-                selectedEdge
+                selectedEdge,
+                edgeStartNode,
+                tempEdgePos
             );
         });
         if (canvasRef.current) ro.observe(canvasRef.current);
@@ -171,36 +192,62 @@ export default function GraphVisualizer() {
         return Math.sqrt(dx * dx + dy * dy);
     }
 
+    const handleDoubleClick = useCallback((e) => {
+        const { x, y } = getPos(e);
+
+        const hit = nodes.find(n => Math.hypot(n.x - x, n.y - y) < NODE_RADIUS);
+
+        if (edgeStartNode && !hit) {
+            setEdgeStartNode(null);
+            setTempEdgePos(null);
+            return;
+        }
+
+        if (hit) {
+            setEdgeStartNode(hit.id);
+            setTempEdgePos({ x: hit.x, y: hit.y });
+        }
+    }, [nodes, edgeStartNode]);
+
     const handleCanvasClick = useCallback(e => {
         if (draggingRef.current) return;
+
         const { x, y } = getPos(e);
+
         const hit = nodes.find(n => Math.hypot(n.x - x, n.y - y) < NODE_RADIUS);
+
+        if (edgeStartNode) {
+            if (hit && hit.id !== edgeStartNode) {
+
+                // prevent duplicate
+                if (!edges.find(e => e.from === edgeStartNode && e.to === hit.id)) {
+                    setEdges(prev => [...prev, {
+                        id: Date.now(),
+                        from: edgeStartNode,
+                        to: hit.id,
+                        weight: 1
+                    }]);
+                }
+            }
+
+            // reset mode
+            setEdgeStartNode(null);
+            setTempEdgePos(null);
+            return;
+        }
+
+        // existing selection logic
         if (hit) {
             setSelectedNode(hit.id);
             setSelectedEdge(null);
             return;
         }
 
-        // detect edge click (basic proximity)
-        const edgeHit = edges.find(e => {
-            const from = nodes.find(n => n.id === e.from);
-            const to = nodes.find(n => n.id === e.to);
-            if (!from || !to) return false;
-
-            const dist = pointToLineDistance(x, y, from.x, from.y, to.x, to.y);
-            return dist < 6; // threshold
-        });
-
-        if (edgeHit) {
-            setSelectedEdge(edgeHit.id);
-            setSelectedNode(null);
-            return;
-        }
-
-        // otherwise add node
+        // add node (existing)
         const id = Date.now();
         setNodes(prev => [...prev, { id, label: String(prev.length + 1), x, y }]);
-    }, [nodes]);
+
+    }, [nodes, edges, edgeStartNode]);
 
     const handleMouseDown = useCallback(e => {
         const { x, y } = getPos(e);
@@ -212,14 +259,22 @@ export default function GraphVisualizer() {
     }, [nodes]);
 
     const handleMouseMove = useCallback(e => {
-        if (!draggingRef.current) return;
         const { x, y } = getPos(e);
-        setNodes(prev => prev.map(n =>
-            n.id === draggingRef.current
-                ? { ...n, x: x - dragOffRef.current.x, y: y - dragOffRef.current.y }
-                : n
-        ));
-    }, []);
+
+        if (draggingRef.current) {
+            setNodes(prev => prev.map(n =>
+                n.id === draggingRef.current
+                    ? { ...n, x: x - dragOffRef.current.x, y: y - dragOffRef.current.y }
+                    : n
+            ));
+            return;
+        }
+
+        if (edgeStartNode) {
+            setTempEdgePos({ x, y });
+        }
+
+    }, [edgeStartNode]);
 
     const handleMouseUp = useCallback(() => { draggingRef.current = null; }, []);
 
@@ -376,81 +431,120 @@ export default function GraphVisualizer() {
 
     // ── render ───────────────────────────────────────────────────────────────
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 font-mono p-4 flex flex-col gap-3">
+        <div className={`min-h-screen ${T.bg} ${T.text} font-mono p-4 flex flex-col gap-4`}>
 
             {/* ── header ── */}
             <div className="flex items-center gap-3">
-                <h1 className="text-lg font-bold tracking-widest text-blue-400 uppercase">
+                <h1 className={`text-lg font-semibold tracking-wide ${T.accent}`}>
                     Graph Visualizer
                 </h1>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+
+                <span className={`text-xs px-2 py-0.5 rounded ${T.panel} border ${T.border} ${T.subtext}`}>
                     {nodes.length} nodes · {edges.length} edges
                 </span>
+
                 {steps.length > 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-900/50 text-blue-300 border border-blue-800">
-                        step {stepIndex} / {steps.length}
+                    <span className={`text-xs px-2 py-0.5 rounded ${T.panel} border ${T.border} ${T.accent}`}>
+                        {stepIndex}/{steps.length}
                     </span>
                 )}
+
+                <div className="ml-auto">
+                    <button
+                        onClick={() => setTheme(prev => prev === "dark" ? "light" : "dark")}
+                        className={`px-3 py-1 rounded-md text-sm ${T.button}`}
+                    >
+                        {theme === "dark" ? "Light" : "Dark"}
+                    </button>
+                </div>
             </div>
 
-            {/* ── add node / add edge ── */}
-            <div className="grid grid-cols-2 gap-2">
+            {/* ── add node / edge ── */}
+            <div className="grid grid-cols-2 gap-3">
 
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col gap-2">
-                    <p className="text-xs text-slate-500 uppercase tracking-widest">Add Node</p>
-                    <div className="flex gap-2 items-center">
+                {/* Add Node */}
+                <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex flex-col gap-2`}>
+                    <p className={`text-xs ${T.subtext}`}>Add Node</p>
+
+                    <div className="flex gap-2">
                         <input
                             value={nodeLabel_}
                             onChange={e => setNodeLabel_(e.target.value)}
                             onKeyDown={e => e.key === "Enter" && addNode()}
-                            placeholder="Label (optional)"
-                            className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
+                            placeholder="Label"
+                            className="flex-1 bg-transparent border border-neutral-600 rounded px-2 py-1 text-sm outline-none focus:border-green-500"
                         />
 
-                        <CustomButton onClick={addNode} color="blue">+ Node</CustomButton>
+                        <button onClick={addNode} className="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-sm">
+                            +
+                        </button>
 
-                        {/* JSON Upload */}
                         <label className="cursor-pointer">
-                            <input
-                                type="file"
-                                accept=".json"
-                                onChange={handleJsonUpload}
-                                className="hidden"
-                            />
-                            <span className="px-3 py-1.5 text-sm rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:border-blue-500">
-                                Upload JSON
-                            </span>
+                            <input type="file" accept=".json" onChange={handleJsonUpload} className="hidden" />
+                            <span className={`px-2 py-1 text-sm rounded ${T.button}`}>JSON</span>
                         </label>
                     </div>
                 </div>
 
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col gap-2">
-                    <p className="text-xs text-slate-500 uppercase tracking-widest">Add Edge</p>
+                {/* Add Edge */}
+                <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex flex-col gap-2`}>
+                    <p className={`text-xs ${T.subtext}`}>Add Edge</p>
+
                     <div className="flex gap-2">
-                        <select value={edgeFrom} onChange={e => setEdgeFrom(e.target.value)}
-                            className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
-                            <option value="">From</option>
-                            {nodes.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
-                        </select>
-                        <select value={edgeTo} onChange={e => setEdgeTo(e.target.value)}
-                            className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
-                            <option value="">To</option>
-                            {nodes.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
-                        </select>
+                        <div className="relative flex-1">
+                            <select
+                                value={edgeFrom}
+                                onChange={e => setEdgeFrom(e.target.value)}
+                                className={`${selectClass(T)} w-full`}
+                            >
+                                <option value="">From</option>
+                                {nodes.map(n => (
+                                    <option key={n.id} value={n.id}>
+                                        {n.label}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
+                                ▼
+                            </span>
+                        </div>
+
+                        <div className="relative flex-1">
+                            <select
+                                value={edgeTo}
+                                onChange={e => setEdgeTo(e.target.value)}
+                                className={`${selectClass(T)} w-full`}
+                            >
+                                <option value="">To</option>
+                                {nodes.map(n => (
+                                    <option key={n.id} value={n.id}>
+                                        {n.label}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
+                                ▼
+                            </span>
+                        </div>
+
                         <input
-                            type="number" value={edgeWeight}
+                            type="number"
+                            value={edgeWeight}
                             onChange={e => setEdgeWeight(e.target.value)}
-                            className="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 text-center"
-                            placeholder="W"
+                            className="w-16 bg-transparent border border-neutral-600 rounded px-2 py-1 text-sm text-center"
                         />
-                        <CustomButton onClick={addEdge} color="emerald">+ Edge</CustomButton>
+
+                        <button onClick={addEdge} className="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-white text-sm">
+                            +
+                        </button>
                     </div>
                 </div>
             </div>
 
             {/* ── canvas ── */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden relative"
-                style={{ height: 340 }}>
+            <div className={`${T.panel} border ${T.border} rounded-lg overflow-hidden`} style={{ height: 360 }}>
                 <canvas
                     ref={canvasRef}
                     style={{ width: "100%", height: "100%", cursor: "crosshair" }}
@@ -459,154 +553,123 @@ export default function GraphVisualizer() {
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
+                    onDoubleClick={handleDoubleClick}
                 />
-                <p className="absolute bottom-2 right-3 text-xs text-slate-700">
-                    click canvas to add node · drag to move
-                </p>
             </div>
+
+            {/* ── selection panels ── */}
             {selectedNode && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2 items-center">
-                    <span className="text-xs text-slate-400">Node</span>
-
+                <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex gap-2 items-center`}>
                     <input
-                        placeholder="Edit label"
+                        placeholder="Label"
                         onChange={(e) => updateNodeLabel(e.target.value)}
-                        className="bg-slate-800 border border-slate-700 px-2 py-1 rounded text-sm"
+                        className="border border-neutral-600 px-2 py-1 rounded text-sm"
                     />
-
-                    <CustomButton onClick={deleteNode} color="red">
-                        Delete Node
-                    </CustomButton>
-                    <CustomButton onClick={() => setSelectedNode(null)} color="red">
-                        X
-                    </CustomButton>
+                    <button onClick={deleteNode} className="px-3 py-1 bg-red-600 text-white rounded">Delete</button>
                 </div>
             )}
 
             {selectedEdge && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2 items-center">
-                    <span className="text-xs text-slate-400">Edge {selectedEdge}</span>
-
+                <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex gap-2 items-center`}>
                     <input
                         type="number"
-                        placeholder="Weight"
                         onChange={(e) => updateEdgeWeight(e.target.value)}
-                        className="w-20 bg-slate-800 border border-slate-700 px-2 py-1 rounded text-sm"
+                        className="w-20 border border-neutral-600 px-2 py-1 rounded text-sm"
                     />
-
-                    <CustomButton onClick={deleteEdge} color="red">
-                        Delete Edge
-                    </CustomButton>
-
-                    <CustomButton onClick={() => setSelectedEdge(null)} color="red">
-                        X
-                    </CustomButton>
+                    <button onClick={deleteEdge} className="px-3 py-1 bg-red-600 text-white rounded">Delete</button>
                 </div>
             )}
-            {/* ── algorithm controls ── */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap gap-2 items-center">
-                <select value={algo} onChange={e => setAlgo(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+
+            {/* ── controls ── */}
+            <div className={`${T.panel} border ${T.border} rounded-lg p-3 flex flex-wrap gap-2`}>
+
+                <select
+                    value={algo}
+                    onChange={e => setAlgo(e.target.value)}
+                    className={`${selectClass(T)}`}
+                >
                     {ALGORITHMS.map(a => <option key={a}>{a}</option>)}
                 </select>
 
-                <select value={startNode} onChange={e => setStartNode(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
-                    <option value="">Start node</option>
-                    {nodes.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
-                </select>
-
-                <div className="flex gap-1.5 flex-wrap">
-                    <CustomButton onClick={handleRun} color="blue">Run</CustomButton>
-                    <CustomButton
-                        onClick={handlePlayPause}
-                        color={running ? "amber" : "emerald"}
-                        disabled={steps.length === 0}
+                <div className="relative">
+                    <select
+                        value={startNode}
+                        onChange={e => setStartNode(e.target.value)}
+                        className={`${selectClass(T)} w-full`}
                     >
-                        {running ? "⏸ Pause" : "▶ Play"}
-                    </CustomButton>
-                    <CustomButton onClick={stepBack} color="slate" disabled={stepIndex === 0}>‹ Prev</CustomButton>
-                    <CustomButton onClick={stepForward} color="slate" disabled={stepIndex >= steps.length}>Next ›</CustomButton>
-                    <CustomButton onClick={handleReset} color="slate">Reset</CustomButton>
-                    <CustomButton onClick={handleClear} color="red">Clear all</CustomButton>
+                        <option value="">Start</option>
+                        {nodes.map(n => (
+                            <option key={n.id} value={n.id}>
+                                {n.label}
+                            </option>
+                        ))}
+                    </select>
+
+                    {/* custom arrow */}
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">
+                        ▼
+                    </span>
                 </div>
 
-                <div className="flex items-center gap-2 ml-auto">
-                    <span className="text-xs text-slate-500">Speed</span>
+                <button onClick={handleRun} className={btnPrimary}>
+                    Run
+                </button>
+
+                <button onClick={handlePlayPause} className={btnNeutral(T)}>
+                    {running ? "Pause" : "Play"}
+                </button>
+
+                <button onClick={stepBack} className={`${btnNeutral(T)} px-2`}>
+                    ‹
+                </button>
+
+                <button onClick={stepForward} className={`${btnNeutral(T)} px-2`}>
+                    ›
+                </button>
+
+                <button onClick={handleReset} className={btnNeutral(T)}>
+                    Reset
+                </button>
+
+                <button onClick={handleClear} className={btnDanger}>
+                    Clear
+                </button>
+                
+                <div className="ml-auto flex items-center gap-2">
                     <input
-                        type="range" min={100} max={2000} step={100} value={speed}
-                        onChange={e => { const v = Number(e.target.value); setSpeed(v); speedRef.current = v; }}
-                        className="w-24 accent-blue-500"
+                        type="range"
+                        min={100}
+                        max={2000}
+                        step={100}
+                        value={speed}
+                        onChange={e => setSpeed(Number(e.target.value))}
+                        className="accent-green-500"
                     />
-                    <span className="text-xs text-slate-400 w-12">{speed}ms</span>
+                    <span className="text-xs">{speed}ms</span>
                 </div>
             </div>
 
-            {/* ── legend + step panel ── */}
-            <div className="grid grid-cols-2 gap-2">
+            {/* ── steps ── */}
+            <div className={`${T.panel} border ${T.border} rounded-lg p-3`}>
+                <div className="text-xs mb-2">Steps</div>
 
-                {/* legend */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
-                    <p className="text-xs text-slate-500 uppercase tracking-widest mb-2">Legend</p>
-                    <div className="flex flex-wrap gap-2">
-                        {Object.entries(NODE_COLORS).map(([state, col]) => (
-                            <span key={state} className="flex items-center gap-1.5 text-xs">
-                                <span style={{ background: col.fill, border: `2px solid ${col.stroke}` }}
-                                    className="w-3 h-3 rounded-full inline-block" />
-                                <span className="text-slate-400 capitalize">{state}</span>
-                            </span>
-                        ))}
-                    </div>
-
-                    <p className="text-xs text-slate-500 uppercase tracking-widest mt-3 mb-1.5">Edge states</p>
-                    <div className="flex flex-wrap gap-2">
-                        {Object.entries(EDGE_COLORS).map(([state, color]) => (
-                            <span key={state} className="flex items-center gap-1.5 text-xs">
-                                <span style={{ background: color }} className="w-4 h-0.5 inline-block rounded" />
-                                <span style={{ color }} className="capitalize">{state}</span>
-                            </span>
-                        ))}
-                    </div>
+                <div className="max-h-32 overflow-y-auto text-xs flex flex-col gap-1">
+                    {steps.map((s, i) => (
+                        <div
+                            key={i}
+                            className={`px-2 py-1 rounded ${i === stepIndex - 1
+                                ? "bg-green-700 text-white"
+                                : "text-neutral-500"
+                                }`}
+                        >
+                            {i + 1}. {s.label}
+                        </div>
+                    ))}
                 </div>
 
-                {/* step log + dist table */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col gap-1 overflow-hidden">
-                    <div className="flex items-center justify-between mb-1">
-                        <p className="text-xs text-slate-500 uppercase tracking-widest">Steps</p>
-                        {steps.length > 0 && (
-                            <span className="text-xs text-slate-600">{stepIndex}/{steps.length}</span>
-                        )}
-                    </div>
-
-                    <div ref={stepsListRef}
-                        className="overflow-y-auto flex flex-col gap-0.5"
-                        style={{ maxHeight: 110 }}>
-                        {steps.length === 0
-                            ? <span className="text-xs text-slate-600">Run an algorithm to see steps.</span>
-                            : steps.map((s, i) => (
-                                <div
-                                    key={i}
-                                    ref={i === stepIndex - 1 ? activeStepRef : null}
-                                    className={`text-xs px-2 py-1 rounded transition-colors ${i === stepIndex - 1
-                                        ? "bg-blue-900/60 text-blue-300 font-semibold"
-                                        : i < stepIndex
-                                            ? "text-slate-500"
-                                            : "text-slate-700"
-                                        }`}
-                                >
-                                    {i + 1}. {s.label}
-                                </div>
-                            ))
-                        }
-                    </div>
-
-                    {/* distance / cost table */}
-                    <DistTable algo={algo} nodes={nodes} step={currentStep} />
-
-                    {/* highlighted edge costs */}
-                    {/* <EdgeCostBadge edges={edges} edgeStates={currentEdgeStates} /> */}
-                </div>
+                <DistTable algo={algo} nodes={nodes} step={currentStep} />
             </div>
+
         </div>
     );
 }

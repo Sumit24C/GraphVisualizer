@@ -1,5 +1,14 @@
 import { NODE_COLORS, NODE_RADIUS, EDGE_COLORS } from "../../constants";
 
+export const loadGraph = () => {
+    try {
+        const saved = localStorage.getItem("graph-data");
+        return saved ? JSON.parse(saved) : { nodes: [], edges: [] };
+    } catch {
+        return { nodes: [], edges: [] };
+    }
+};
+
 export function buildAdjacency(nodes, edges) {
     const g = {};
     nodes.forEach(n => (g[n.id] = []));
@@ -58,7 +67,9 @@ export function drawGraph(
     nodeStates = {},
     edgeStates = {},
     selectedNode = null,
-    selectedEdge = null
+    selectedEdge = null,
+    edgeStartNode = null,
+    tempEdgePos = null
 ) {
     if (!canvas) return;
 
@@ -101,7 +112,6 @@ export function drawGraph(
         ctx.strokeStyle = color;
         ctx.lineWidth = lw;
 
-        // ❌ no glow
         ctx.shadowBlur = 0;
 
         ctx.beginPath();
@@ -143,6 +153,25 @@ export function drawGraph(
         ctx.restore();
     });
 
+    // TEMP EDGE PREVIEW
+    if (edgeStartNode && tempEdgePos) {
+        const from = nodes.find(n => n.id === edgeStartNode);
+
+        if (from) {
+            ctx.save();
+            ctx.strokeStyle = "#94a3b8";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(tempEdgePos.x, tempEdgePos.y);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+    }
+
     // ─────────────────────────────────────────
     // NODES
     // ─────────────────────────────────────────
@@ -162,7 +191,6 @@ export function drawGraph(
 
         ctx.save();
 
-        // ❌ no glow
         ctx.shadowBlur = 0;
 
         // circle
