@@ -215,6 +215,21 @@ export default function GraphVisualizer() {
         const { x, y } = getPos(e);
 
         const hit = nodes.find(n => Math.hypot(n.x - x, n.y - y) < NODE_RADIUS);
+        // detect edge click FIRST
+        const edgeHit = edges.find(e => {
+            const from = nodes.find(n => n.id === e.from);
+            const to = nodes.find(n => n.id === e.to);
+            if (!from || !to) return false;
+
+            const dist = pointToLineDistance(x, y, from.x, from.y, to.x, to.y);
+            return dist < 8; // threshold
+        });
+
+        if (edgeHit) {
+            setSelectedEdge(edgeHit.id);
+            setSelectedNode(null);
+            return;
+        }
 
         if (edgeStartNode) {
             if (hit && hit.id !== edgeStartNode) {
@@ -347,7 +362,7 @@ export default function GraphVisualizer() {
 
         reader.readAsText(file);
     };
-
+    
     // ── animation loop ───────────────────────────────────────────────────────
     const tick = useCallback(() => {
         const idx = stepIndexRef.current;
@@ -566,6 +581,8 @@ export default function GraphVisualizer() {
                         className="border border-neutral-600 px-2 py-1 rounded text-sm"
                     />
                     <button onClick={deleteNode} className="px-3 py-1 bg-red-600 text-white rounded">Delete</button>
+                    <button onClick={() => setSelectedNode(null)} className="px-3 py-1 bg-red-600 text-white rounded">X</button>
+
                 </div>
             )}
 
@@ -577,6 +594,8 @@ export default function GraphVisualizer() {
                         className="w-20 border border-neutral-600 px-2 py-1 rounded text-sm"
                     />
                     <button onClick={deleteEdge} className="px-3 py-1 bg-red-600 text-white rounded">Delete</button>
+                    <button onClick={() => setSelectedEdge(null)} className="px-3 py-1 bg-red-600 text-white rounded">X</button>
+
                 </div>
             )}
 
@@ -634,7 +653,7 @@ export default function GraphVisualizer() {
                 <button onClick={handleClear} className={btnDanger}>
                     Clear
                 </button>
-                
+
                 <div className="ml-auto flex items-center gap-2">
                     <input
                         type="range"
