@@ -6,6 +6,8 @@ import { Trash2 } from "lucide-react";
 
 function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCurrentGraphId, onGraphLoaded, T }) {
     const token = localStorage.getItem("token");
+    const [loading, setLoading] = useState(false);
+    const [action, setAction] = useState(""); // "create" | "load" | "delete"
 
     const [graphs, setGraphs] = useState([]);
     const [open, setOpen] = useState(false);
@@ -26,7 +28,8 @@ function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCur
     const deleteGraph = async (id) => {
         const confirmDelete = window.confirm("Delete this graph?");
         if (!confirmDelete) return;
-
+        setLoading(true);
+        setAction("delete");
         try {
             await fetch(`${BASE_URL}/graph/${id}`, {
                 method: "DELETE",
@@ -44,31 +47,42 @@ function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCur
 
         } catch (err) {
             console.error(err);
+        } finally {
+            setLoading(false);
         }
     };
 
     const createGraph = async () => {
-        const res = await fetch(`${BASE_URL}/graph`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                name: `Graph ${Date.now()}`,
-                nodes: [],
-                edges: []
-            })
-        });
+        setLoading(true);
+        setAction("create");
+        try {
 
-        const data = await res.json();
+            const res = await fetch(`${BASE_URL}/graph`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    name: `Graph ${Date.now()}`,
+                    nodes: [],
+                    edges: []
+                })
+            });
 
-        setNodes([]);
-        setEdges([]);
+            const data = await res.json();
 
-        navigate(`/graph/${data._id}`);
+            setNodes([]);
+            setEdges([]);
 
-        fetchGraphs();
+            navigate(`/graph/${data._id}`);
+
+            fetchGraphs();
+        } catch (error) {
+            console.log("error", error)
+        } finally {
+            setLoading(false);
+        }
     };
     const saveGraph = async () => {
 
@@ -86,18 +100,28 @@ function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCur
 
     // Load a previously saved graph
     const handleLoad = async (id) => {
-        const res = await fetch(`${BASE_URL}/graph/${id}`, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
+        setLoading(true);
+        setAction("load");
+        try {
 
-        const data = await res.json();
 
-        setNodes(data.nodes || []);
-        setEdges(data.edges || []);
-        setOpen(false);
+            const res = await fetch(`${BASE_URL}/graph/${id}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
 
-        // This tells the parent to update the URL and currentGraphId
-        onGraphLoaded(id);
+            const data = await res.json();
+
+            setNodes(data.nodes || []);
+            setEdges(data.edges || []);
+            setOpen(false);
+
+            // This tells the parent to update the URL and currentGraphId
+            onGraphLoaded(id);
+        } catch (error) {
+            console.log("error", error);
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -105,10 +129,10 @@ function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCur
 
             <button
                 onClick={createGraph}
-                className="flex items-center gap-1 px-3 py-1 bg-purple-600 hover:bg-purple-500 rounded text-sm"
+                disabled={loading}
+                className="flex items-center gap-1 px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded text-sm"
             >
-                <Plus size={14} />
-                New
+                {loading && action === "create" ? "Creating..." : <><Plus size={14} /> New</>}
             </button>
 
             {/* <button
@@ -122,10 +146,10 @@ function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCur
 
             <button
                 onClick={() => { fetchGraphs(); setOpen(true); }}
-                className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-sm"
+                disabled={loading}
+                className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm"
             >
-                <FolderOpen size={14} />
-                Load
+                {loading && action === "load" ? "Loading..." : <><FolderOpen size={14} /> Load</>}
             </button>
 
             {/* Current graph indicator */}
@@ -174,7 +198,7 @@ function GraphManager({ nodes, edges, setNodes, setEdges, currentGraphId, setCur
                                         }}
                                         className="text-red-400 hover:text-red-300"
                                     >
-                                        <Trash2 size={14} />
+                                        {loading && action === "delete" ? "..." : <Trash2 size={14} />}
                                     </button>
                                 </div>
 
